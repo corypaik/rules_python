@@ -5,3 +5,9 @@ py_binary(
     srcs = ["generator.py"],
     visibility = ["//visibility:public"],
 )
+
+py_binary(
+    name = "merger",
+    srcs = ["merger.py"],
+    visibility = ["//visibility:public"],
+)

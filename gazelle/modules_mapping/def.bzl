@@ -13,11 +13,27 @@ def _modules_mapping_impl(ctx):
     modules_mapping = ctx.actions.declare_file(ctx.attr.modules_mapping_name)
     args = ctx.actions.args()
     args.add(modules_mapping.path)
-    args.add_all([whl.path for whl in ctx.files.wheels])
+    modules_mapping_inputs = []
+
+    for whl in ctx.files.wheels:
+        whl_modules_mapping = ctx.actions.declare_file(
+            "%s.%s.json" % (ctx.attr.name, whl.path),
+        )
+        args.add(whl_modules_mapping)
+        modules_mapping_inputs = modules_mapping_inputs + [whl_modules_mapping]
+
+        ctx.actions.run(
+            inputs = [whl],
+            outputs = [whl_modules_mapping],
+            executable = ctx.executable._generator,
+            arguments = [whl_modules_mapping.path, whl.path],
+            use_default_shell_env = False,
+        )
+
     ctx.actions.run(
-        inputs = ctx.files.wheels,
+        inputs = modules_mapping_inputs,
         outputs = [modules_mapping],
-        executable = ctx.executable._generator,
+        executable = ctx.executable._merger,
         arguments = [args],
         use_default_shell_env = False,
     )
@@ -37,8 +53,13 @@ modules_mapping = rule(
             mandatory = True,
         ),
         "_generator": attr.label(
-            cfg = "host",
+            cfg = "exec",
             default = "//gazelle/modules_mapping:generator",
+            executable = True,
+        ),
+        "_merger": attr.label(
+            cfg = "exec",
+            default = "//gazelle/modules_mapping:merger",
             executable = True,
         ),
     },
