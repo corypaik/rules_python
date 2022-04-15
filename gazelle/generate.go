@@ -53,10 +53,25 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 			if parent != nil && parent.CoarseGrainedGeneration() {
 				return language.GenerateResult{}
 			}
-		} else if !hasEntrypointFile(args.Dir) {
+		} else if cfg.PackageGeneration() && !hasEntrypointFile(args.Dir) {
 			return language.GenerateResult{}
 		}
 	}
+
+	var result language.GenerateResult
+	if cfg.PackageGeneration() || cfg.CoarseGrainedGeneration() {
+		result = py.generateRulesPackage(cfg, args)
+	} else if cfg.ModuleGeneration() {
+		result = py.generateRulesModule(cfg, args)
+	} else {
+		log.Fatalf("unknown generation mode %s", cfg.GenerationMode())
+	}
+	return result
+}
+
+// generateRulesPackage extracts build metadata from source files in a
+// directory for the `package` and `project` generation modes.
+func (py *Python) generateRulesPackage(cfg *pythonconfig.Config, args language.GenerateArgs) language.GenerateResult {
 
 	pythonProjectRoot := cfg.PythonProjectRoot()
 
@@ -194,7 +209,7 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 
 	var pyLibrary *rule.Rule
 	if !pyLibraryFilenames.Empty() {
-		deps, err := parser.parse(pyLibraryFilenames)
+		_, deps, err := parser.parse(pyLibraryFilenames)
 		if err != nil {
 			log.Fatalf("ERROR: %v\n", err)
 		}
@@ -231,7 +246,7 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 	}
 
 	if hasPyBinary {
-		deps, err := parser.parseSingle(pyBinaryEntrypointFilename)
+		_, deps, err := parser.parseSingle(pyBinaryEntrypointFilename)
 		if err != nil {
 			log.Fatalf("ERROR: %v\n", err)
 		}
@@ -274,7 +289,7 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 
 	var conftest *rule.Rule
 	if hasConftestFile {
-		deps, err := parser.parseSingle(conftestFilename)
+		_, deps, err := parser.parseSingle(conftestFilename)
 		if err != nil {
 			log.Fatalf("ERROR: %v\n", err)
 		}
@@ -315,7 +330,7 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 			// the file exists on disk.
 			pyTestFilenames.Add(pyTestEntrypointFilename)
 		}
-		deps, err := parser.parse(pyTestFilenames)
+		_, deps, err := parser.parse(pyTestFilenames)
 		if err != nil {
 			log.Fatalf("ERROR: %v\n", err)
 		}
@@ -376,8 +391,192 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 		}
 		os.Exit(1)
 	}
+	return result
+}
+
+// generateRulesModule extracts build metadata from source files in a
+// directory for the `module` generation modes.
+//
+// Every module is either:
+// 1.                  -> py_library
+// 2.          + main  -> py_binary
+// 3. test name        -> py_library
+// 3. test name + main -> py_test
+//
+// NOTE: Currently all module targets use the module naming convention, not the
+// package, library, or test naming conventions. By default, this means all
+// modules will be named exactly the name of their module.
+//
+// Additionally, if the filename matches the package name and a __init__.py is
+// present, that will not work because we will have a conflict: the __init__.py
+// will produce a target of the same name.
+func (py *Python) generateRulesModule(cfg *pythonconfig.Config, args language.GenerateArgs) language.GenerateResult {
+
+	pythonProjectRoot := cfg.PythonProjectRoot()
+
+	packageName := filepath.Base(args.Dir)
+
+	pyFilenames := treeset.NewWith(godsutils.StringComparator)
+
+	// Make a list of all python files, we'll check what they are later.
+	for _, f := range args.RegularFiles {
+		if cfg.IgnoresFile(filepath.Base(f)) {
+			continue
+		}
+
+		if filepath.Ext(f) == ".py" {
+			pyFilenames.Add(f)
+		}
+	}
+
+	parser := newPython3Parser(
+		args.Config.RepoRoot, args.Rel, cfg.IgnoresDependency)
+
+	var result language.GenerateResult
+	result.Gen = make([]*rule.Rule, 0)
+
+	collisionErrors := singlylinkedlist.New()
+
+	It := pyFilenames.Iterator()
+
+	for It.Next() {
+		// Get the dependencies of this python module
+		fileName := It.Value().(string)
+		moduleName := getModuleName(fileName)
+
+		hasMain, deps, err := parser.parseSingle(It.Value().(string))
+
+		if err != nil {
+			log.Fatalf("ERROR: %v\n", err)
+		}
+
+		uiudkey := uuid.Must(uuid.NewUUID()).String()
+
+		// Only create a test if it matches the test naming scheme AND it has
+		// a __main__ dunder.
+		if isPyTest(fileName) && hasMain {
+
+			// Tests use the module name.
+			pyTestTargetName := cfg.RenderModuleName(moduleName)
+
+			// Check for a collision
+			err := checkCollision(args, pyTestTargetName, pyTestKind, pythonconfig.ModuleNamingConvention)
+			if err != nil {
+				collisionErrors.Add(err)
+			}
+
+			pyTestTarget := newTargetBuilder(pyTestKind, pyTestTargetName, pythonProjectRoot, args.Rel).
+				addSrc(fileName).
+				addModuleDependencies(deps).
+				generateImportsAttribute().
+				setMain(fileName)
+
+			pyTest := pyTestTarget.build()
+
+			result.Gen = append(result.Gen, pyTest)
+			result.Imports = append(result.Imports, pyTest.PrivateAttr(config.GazelleImportsKey))
+
+			// A py_test makes no other targets.
+			continue
+		}
+
+		// We create a binary iff there is a main attribute, otherwise create a
+		// library.
+		if hasMain {
+
+			pyBinaryTargetName := cfg.RenderModuleName(moduleName)
+
+			// Check for collisions
+			err := checkCollision(args, pyBinaryTargetName, pyBinaryKind, pythonconfig.ModuleNamingConvention)
+			if err != nil {
+				collisionErrors.Add(err)
+			}
+
+			pyBinaryTarget := newTargetBuilder(pyBinaryKind, pyBinaryTargetName, pythonProjectRoot, args.Rel).
+				setMain(fileName).
+				addSrc(fileName).
+				addModuleDependencies(deps).
+				generateImportsAttribute()
+
+			pyBinary := pyBinaryTarget.build()
+
+			result.Gen = append(result.Gen, pyBinary)
+			result.Imports = append(result.Imports, pyBinary.PrivateAttr(config.GazelleImportsKey))
+		} else {
+			// If the filename is __init__.py, use the directory name. Otherwise use
+			// the filename.
+			var pyLibraryTargetName string
+			if fileName == pyLibraryEntrypointFilename {
+				pyLibraryTargetName = cfg.RenderLibraryName(packageName)
+			} else {
+				pyLibraryTargetName = cfg.RenderModuleName(moduleName)
+			}
+
+			// Check for a collision
+			err := checkCollision(args, pyLibraryTargetName, pyLibraryKind, pythonconfig.ModuleNamingConvention)
+			if err != nil {
+				collisionErrors.Add(err)
+			}
+
+			pyLibraryBuilder := newTargetBuilder(pyLibraryKind, pyLibraryTargetName, pythonProjectRoot, args.Rel).
+				setUUID(uiudkey).
+				addSrc(fileName).
+				addModuleDependencies(deps).
+				generateImportsAttribute()
+
+			pyLibrary := pyLibraryBuilder.build()
+
+			result.Gen = append(result.Gen, pyLibrary)
+			result.Imports = append(result.Imports, pyLibrary.PrivateAttr(config.GazelleImportsKey))
+		}
+	}
+
+	if !collisionErrors.Empty() {
+		it := collisionErrors.Iterator()
+		for it.Next() {
+			log.Printf("ERROR: %v\n", it.Value())
+		}
+		os.Exit(1)
+	}
 
 	return result
+}
+
+// Checks if a target with the same name we are generating already exists, and
+// if it is of a different kind from the one we are generating. If so, this will
+// return an error. Note that this returns only the first such error.
+func checkCollision(args language.GenerateArgs, targetName, targetKind, namingConvention string) error {
+
+	if args.File != nil {
+		for _, t := range args.File.Rules {
+			if t.Name() == targetName && t.Kind() != targetKind {
+				fqTarget := label.New("", args.Rel, targetName)
+				err := fmt.Errorf("failed to generate target %q of kind %q: "+
+					"a target of kind %q with the same name already exists. "+
+					"Use the '# gazelle:%s' directive to change the naming convention.",
+					fqTarget.String(), targetKind, t.Kind(), namingConvention)
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// isPyTest determines if a file is a test based on the suffix. Any file with
+// the suffix `_test.py` is considered a test.
+// TODO(corypaik): Consider parameterizing this s.t. it supports other methods
+// of path-based matching (e.g., test/* or test_*.py).
+func isPyTest(f string) bool {
+	ext := filepath.Ext(f)
+	return strings.HasSuffix(f, "_test.py") && ext == ".py"
+}
+
+// getModuleName determines a module's name based on the file name.
+func getModuleName(fileName string) string {
+	if pos := strings.LastIndexByte(fileName, '.'); pos != -1 {
+		return fileName[:pos]
+	}
+	return fileName
 }
 
 // isBazelPackage determines if the directory is a Bazel package by probing for

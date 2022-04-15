@@ -45,6 +45,21 @@ def parse_comments(content):
     return comments
 
 
+def parse_has_main(content):
+    tree = ast.parse(content)
+    # Iterate only top-level nodes.
+    for node in ast.iter_child_nodes(tree):
+        # Top level if statement
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Compare):
+            # Comparing __name__ and '__main__' with ==
+            if (
+                node.test.left.id == "__name__"
+                and node.test.comparators[0].value == "__main__"
+            ):
+                return True
+    return False
+
+
 def parse(repo_root, rel_package_path, filename):
     rel_filepath = os.path.join(rel_package_path, filename)
     abs_filepath = os.path.join(repo_root, rel_filepath)
@@ -58,9 +73,11 @@ def parse(repo_root, rel_package_path, filename):
             comments_future = executor.submit(parse_comments, content)
         modules = modules_future.result()
         comments = comments_future.result()
+        has_main = parse_has_main(content)
         output = {
             "modules": modules,
             "comments": comments,
+            "has_main": has_main,
         }
         return output
 

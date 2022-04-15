@@ -121,10 +121,8 @@ func (py *Configurer) Configure(c *config.Config, rel string, f *rule.File) {
 			config.SetValidateImportStatements(v)
 		case pythonconfig.GenerationMode:
 			switch pythonconfig.GenerationModeType(strings.TrimSpace(d.Value)) {
-			case pythonconfig.GenerationModePackage:
-				config.SetCoarseGrainedGeneration(false)
-			case pythonconfig.GenerationModeProject:
-				config.SetCoarseGrainedGeneration(true)
+			case pythonconfig.GenerationModePackage,pythonconfig.GenerationModeProject,pythonconfig.GenerationModeModule:
+				config.SetGenerationMode(strings.TrimSpace(d.Value))
 			default:
 				err := fmt.Errorf("invalid value for directive %q: %s",
 					pythonconfig.GenerationMode, d.Value)

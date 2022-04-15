@@ -49,6 +49,8 @@ const (
 	// naming convention. See python_library_naming_convention for more info on
 	// the package name interpolation.
 	TestNamingConvention = "python_test_naming_convention"
+
+	ModuleNamingConvention = "python_module_naming_convention"
 )
 
 // GenerationModeType represents one of the generation modes for the Python
@@ -64,10 +66,14 @@ const (
 	// GenerationModeProject defines the mode in which a coarse-grained target will
 	// be generated englobing sub-directories containing Python files.
 	GenerationModeProject GenerationModeType = "project"
+	// GenerationModeModule creates a py_library target for each module
+	// individually. The parsee determines if it is a binary or test by the main.
+	GenerationModeModule GenerationModeType = "module"
 )
 
 const (
 	packageNameNamingConventionSubstitution = "$package_name$"
+	moduleNameNamingConventionSubstitution  = "$module_name$"
 )
 
 // defaultIgnoreFiles is the list of default values used in the
@@ -103,10 +109,11 @@ type Config struct {
 	ignoreFiles              map[string]struct{}
 	ignoreDependencies       map[string]struct{}
 	validateImportStatements bool
-	coarseGrainedGeneration  bool
+	generationMode           GenerationModeType
 	libraryNamingConvention  string
 	binaryNamingConvention   string
 	testNamingConvention     string
+	moduleNamingConvention   string
 }
 
 // New creates a new Config.
@@ -122,10 +129,11 @@ func New(
 		ignoreFiles:              make(map[string]struct{}),
 		ignoreDependencies:       make(map[string]struct{}),
 		validateImportStatements: true,
-		coarseGrainedGeneration:  false,
+		generationMode:           GenerationModePackage,
 		libraryNamingConvention:  packageNameNamingConventionSubstitution,
 		binaryNamingConvention:   fmt.Sprintf("%s_bin", packageNameNamingConventionSubstitution),
 		testNamingConvention:     fmt.Sprintf("%s_test", packageNameNamingConventionSubstitution),
+		moduleNamingConvention:   moduleNameNamingConventionSubstitution,
 	}
 }
 
@@ -143,13 +151,14 @@ func (c *Config) NewChild() *Config {
 		repoRoot:                 c.repoRoot,
 		pythonProjectRoot:        c.pythonProjectRoot,
 		excludedPatterns:         c.excludedPatterns,
+		generationMode:           c.generationMode,
 		ignoreFiles:              make(map[string]struct{}),
 		ignoreDependencies:       make(map[string]struct{}),
 		validateImportStatements: c.validateImportStatements,
-		coarseGrainedGeneration:  c.coarseGrainedGeneration,
 		libraryNamingConvention:  c.libraryNamingConvention,
 		binaryNamingConvention:   c.binaryNamingConvention,
 		testNamingConvention:     c.testNamingConvention,
+		moduleNamingConvention:   c.moduleNamingConvention,
 	}
 }
 
@@ -294,16 +303,30 @@ func (c *Config) ValidateImportStatements() bool {
 	return c.validateImportStatements
 }
 
-// SetCoarseGrainedGeneration sets whether coarse-grained targets should be
-// generated or not.
-func (c *Config) SetCoarseGrainedGeneration(coarseGrained bool) {
-	c.coarseGrainedGeneration = coarseGrained
-}
-
 // CoarseGrainedGeneration returns whether coarse-grained targets should be
 // generated or not.
 func (c *Config) CoarseGrainedGeneration() bool {
-	return c.coarseGrainedGeneration
+	return c.generationMode == GenerationModeProject
+}
+
+// PackageGeneration returns whether the generation mode is package.
+func (c *Config) PackageGeneration() bool {
+	return c.generationMode == GenerationModePackage
+}
+
+// PackageGeneration returns whether the generation mode is module.
+func (c *Config) ModuleGeneration() bool {
+	return c.generationMode == GenerationModeModule
+}
+
+// SetGenerationMode sets the target generation mode.
+func (c *Config) SetGenerationMode(generationMode string) {
+	c.generationMode = GenerationModeType(generationMode)
+}
+
+// GenerationMode returns the current generation mode.
+func (c *Config) GenerationMode() GenerationModeType {
+	return c.generationMode
 }
 
 // SetLibraryNamingConvention sets the py_library target naming convention.
@@ -337,4 +360,10 @@ func (c *Config) SetTestNamingConvention(testNamingConvention string) {
 // substitutions.
 func (c *Config) RenderTestName(packageName string) string {
 	return strings.ReplaceAll(c.testNamingConvention, packageNameNamingConventionSubstitution, packageName)
+}
+
+func (c *Config) RenderModuleName(moduleName string) string {
+	return strings.ReplaceAll(
+		c.moduleNamingConvention,
+		moduleNameNamingConventionSubstitution, moduleName)
 }

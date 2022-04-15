@@ -92,7 +92,7 @@ func newPython3Parser(
 
 // parseSingle parses a single Python file and returns the extracted modules
 // from the import statements as well as the parsed comments.
-func (p *python3Parser) parseSingle(pyFilename string) (*treeset.Set, error) {
+func (p *python3Parser) parseSingle(pyFilename string) (bool, *treeset.Set, error) {
 	pyFilenames := treeset.NewWith(godsutils.StringComparator)
 	pyFilenames.Add(pyFilename)
 	return p.parse(pyFilenames)
@@ -100,7 +100,11 @@ func (p *python3Parser) parseSingle(pyFilename string) (*treeset.Set, error) {
 
 // parse parses multiple Python files and returns the extracted modules from
 // the import statements as well as the parsed comments.
-func (p *python3Parser) parse(pyFilenames *treeset.Set) (*treeset.Set, error) {
+func (p *python3Parser) parse(pyFilenames *treeset.Set) (bool, *treeset.Set, error) {
+// parse parses a Python file and returns the extracted modules from the import
+// statements. An error is raised if communicating with the long-lived Python
+// parser over stdin and stdout fails.
+// func (p *python3Parser) parse(pyFilepath string) (bool, *treeset.Set, error) {
 	parserMutex.Lock()
 	defer parserMutex.Unlock()
 
@@ -113,20 +117,21 @@ func (p *python3Parser) parse(pyFilenames *treeset.Set) (*treeset.Set, error) {
 	}
 	encoder := json.NewEncoder(parserStdin)
 	if err := encoder.Encode(&req); err != nil {
-		return nil, fmt.Errorf("failed to parse: %w", err)
+		return false, nil, fmt.Errorf("failed to parse: %w", err)
 	}
 
 	reader := bufio.NewReader(parserStdout)
 	data, err := reader.ReadBytes(0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse: %w", err)
+		return false, nil, fmt.Errorf("failed to parse: %w", err)
 	}
 	data = data[:len(data)-1]
 	var allRes []parserResponse
 	if err := json.Unmarshal(data, &allRes); err != nil {
-		return nil, fmt.Errorf("failed to parse: %w", err)
+		return false, nil, fmt.Errorf("failed to parse: %w", err)
 	}
 
+	hasMain := false
 	for _, res := range allRes {
 		annotations := annotationsFromComments(res.Comments)
 
@@ -145,9 +150,12 @@ func (p *python3Parser) parse(pyFilenames *treeset.Set) (*treeset.Set, error) {
 
 			modules.Add(m)
 		}
+		if res.HasMain {
+			hasMain = true
+		}
 	}
 
-	return modules, nil
+	return hasMain, modules, nil
 }
 
 // parserResponse represents a response returned by the parser.py for a given
@@ -158,6 +166,9 @@ type parserResponse struct {
 	// The comments contained in the parsed module. This contains the
 	// annotations as they are comments in the Python module.
 	Comments []comment `json:"comments"`
+	// A boolean indicating if the module has a main entrypoint. This indicates
+	// that the script is a binary or test (depending on the filename)
+	HasMain bool `json:"has_main"`
 }
 
 // module represents a fully-qualified, dot-separated, Python module as seen on
