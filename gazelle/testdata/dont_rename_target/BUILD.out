@@ -2,6 +2,10 @@ load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
     name = "my_custom_target",
+)
+
+py_library(
+    name = "dont_rename_target",
     srcs = ["__init__.py"],
     visibility = ["//:__subpackages__"],
 )
