@@ -1,0 +1,3 @@
+# gazelle:python_extension enabled
+# gazelle:python_root
+# gazelle:python_generation_mode module

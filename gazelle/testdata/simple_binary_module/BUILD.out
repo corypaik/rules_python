@@ -1,0 +1,9 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+# gazelle:python_generation_mode module
+
+py_binary(
+    name = "simple_binary",
+    srcs = ["simple_binary.py"],
+    main = "simple_binary.py",
+)

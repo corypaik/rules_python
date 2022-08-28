@@ -1,0 +1,10 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "ping",
+    srcs = ["__init__.py"],
+    visibility = [
+        "//module_mode:__subpackages__",
+        "//three:__subpackages__",
+    ],
+)

@@ -1,0 +1,17 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+# gazelle:python_extension enabled
+# gazelle:python_root
+# gazelle:python_generation_mode module
+
+py_binary(
+    name = "run",
+    srcs = ["run.py"],
+    main = "run.py",
+    deps = [
+        "//module_mode/bing",
+        "//module_mode/ping",
+        "//module_mode/ping/pong:modified_name_pong",
+        "@four_pip_deps//pypi__oneboto3",
+    ],
+)

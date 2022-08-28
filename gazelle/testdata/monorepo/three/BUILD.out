@@ -5,6 +5,9 @@ load("@rules_python//python:defs.bzl", "py_library")
 # gazelle:resolve py bar //one/bar
 # gazelle:resolve py bar.baz //one/bar/baz:modified_name_baz
 # gazelle:resolve py foo //one/foo
+# gazelle:resolve py ping //module_mode/bing
+# gazelle:resolve py ping //module_mode/ping
+# gazelle:resolve py ping.pong //module_mode/ping/pong:modified_name_pong
 
 py_library(
     name = "three",
@@ -12,6 +15,9 @@ py_library(
     visibility = ["//three:__subpackages__"],
     deps = [
         "//coarse_grained",
+        "//module_mode/bing",
+        "//module_mode/ping",
+        "//module_mode/ping/pong:modified_name_pong",
         "//one/bar",
         "//one/bar/baz:modified_name_baz",
         "//one/foo",

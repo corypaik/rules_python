@@ -1,0 +1,29 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "ping",
+    srcs = ["__init__.py"],
+    imports = [".."],
+    visibility = [
+        "//module_mode:__subpackages__",
+        "//three:__subpackages__",
+    ],
+    deps = [
+        ":util",
+        "@four_pip_deps//pypi__oneboto3",
+    ],
+)
+
+py_library(
+    name = "util",
+    srcs = ["util.py"],
+    imports = [".."],
+)
+
+py_test(
+    name = "util_test",
+    srcs = ["util_test.py"],
+    imports = [".."],
+    main = "util_test.py",
+    deps = [":util"],
+)
