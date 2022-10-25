@@ -50,7 +50,8 @@ def parse_has_main(content):
     # Iterate only top-level nodes.
     for node in ast.iter_child_nodes(tree):
         # Top level if statement
-        if isinstance(node, ast.If) and isinstance(node.test, ast.Compare):
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and
+                              isinstance(node.test.left, ast.Name)) :
             # Comparing __name__ and '__main__' with ==
             if (
                 node.test.left.id == "__name__"
